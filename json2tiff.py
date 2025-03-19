@@ -1,84 +1,65 @@
 import os
+import json
 import numpy as np
+from labelme.utils import shapes_to_label
 from PIL import Image
 
+def json_to_tiff_mask(json_file_path, output_folder):
+    # 读取 JSON 文件
+    with open(json_file_path, 'r') as f:
+        data = json.load(f)
 
-def is_black(pixel):
-    """严格匹配纯黑色"""
-    return (pixel[0] == 0) and (pixel[1] == 0) and (pixel[2] == 0)
+    # 获取图像的高度和宽度
+    image_height = data['imageHeight']
+    image_width = data['imageWidth']
 
+    # 获取所有标注的形状
+    shapes = data['shapes']
 
-def is_red(pixel):
-    """红色范围判断"""
-    return (125 <= pixel[0] <= 130) and (pixel[1] <= 5) and (pixel[2] <= 5)
+    # 获取所有标签名称
+    label_name_to_value = {'_background_': 0}
+    for shape in shapes:
+        label_name = shape['label']
+        if label_name not in label_name_to_value:
+            label_name_to_value[label_name] = len(label_name_to_value)
 
-
-def is_green(pixel):
-    """绿色范围判断"""
-    return (0 <= pixel[0] <=50) and (80 <= pixel[1] <= 150) and (0 <= pixel[2] <= 50)
-
-
-def jpg_to_tiff_mask(jpg_path, output_folder):
-    # 读取图像
-    img = Image.open(jpg_path).convert("RGB")
-    rgb_array = np.array(img)
-
-    # 初始化索引矩阵
-    h, w = rgb_array.shape[:2]
-    index_array = np.zeros((h, w), dtype=np.uint8)
-
-    # 矢量化的颜色判断
-    red_mask = np.logical_and(
-        np.logical_and(125 <= rgb_array[:, :, 0], rgb_array[:, :, 0] <= 130),
-        np.logical_and(rgb_array[:, :, 1] <= 5, rgb_array[:, :, 2] <= 5)
+    # 将标注形状转换为标签掩码
+    result = shapes_to_label(
+        img_shape=(image_height, image_width),
+        shapes=shapes,
+        label_name_to_value=label_name_to_value
     )
 
-    green_mask = np.logical_and(
-        np.logical_and(0 <= rgb_array[:, :, 0], rgb_array[:, :, 0] <= 30),
-        np.logical_and(
-            np.logical_and(100 <= rgb_array[:, :, 1], rgb_array[:, :, 1] <= 130),
-            np.logical_and(0 <= rgb_array[:, :, 2], rgb_array[:, :, 2] <= 10)
-        )
-    )
+    # 检查返回值是否为元组
+    if isinstance(result, tuple):
+        # 假设第一个元素是所需的标签掩码
+        label = result[0]
+    else:
+        label = result
 
-    black_mask = np.logical_and(
-        np.logical_and(rgb_array[:, :, 0] == 0, rgb_array[:, :, 1] == 0),
-        rgb_array[:, :, 2] == 0
-    )
+    # 生成 TIFF 格式的掩码文件路径
+    json_file_name = os.path.basename(json_file_path)
+    base_name = os.path.splitext(json_file_name)[0]
+    output_file_path = os.path.join(output_folder, f'{base_name}_mask.tiff')
 
-    # 优先级：黑色 > 红色 > 绿色
-    index_array[black_mask] = 0  # 背景
-    index_array[red_mask] = 1  # 红色类别
-    index_array[green_mask] = 2  # 绿色类别
+    # 使用 Pillow 库保存 TIFF 格式的掩码
+    label_image = Image.fromarray(label.astype(np.uint8))
+    label_image.save(output_file_path)
 
-    # 创建调色板
-    palette = np.zeros(256 * 3, dtype=np.uint8)
-    # 索引0: 黑色 (0,0,0)
-    # 索引1: 红色 (128,0,0) 使用中间值更易区分
-    # 索引2: 绿色 (0,115,5) 使用中间值更易区分
-    palette[3:6] = [128, 0, 0]  # 索引1
-    palette[6:9] = [0, 115, 5]  # 索引2
+    print(f"Mask saved to: {output_file_path}")
 
-    # 转换为调色板模式
-    mask_img = Image.fromarray(index_array, mode='P')
-    mask_img.putpalette(palette)
+# JSON 文件所在文件夹路径
+json_folder = r"C:\Users\18281\OneDrive\Desktop\label"
+# 输出文件夹路径
+output_folder = r"C:\Users\18281\OneDrive\Desktop\label"
 
-    # 保存文件
-    output_path = os.path.join(output_folder,
-                               os.path.basename(jpg_path).replace('.jpg', '_mask.tiff'))
-    mask_img.save(output_path, compression="tiff_lzw")
-    print(f"Successfully saved: {output_path}")
+# 创建输出文件夹（如果不存在）
+if not os.path.exists(output_folder):
+    os.makedirs(output_folder)
 
-
-# 使用示例
-input_folder = r"C:\Users\18281\OneDrive\Desktop\label" #改成自己的输入文件夹
-output_folder = r"C:\Users\18281\OneDrive\Desktop\label" #输出文件夹
-
-# 创建输出目录
-os.makedirs(output_folder, exist_ok=True)
-
-# 批量处理
-for filename in os.listdir(input_folder):
-    if filename.lower().endswith(('.jpg', '.jpeg')):
-        jpg_path = os.path.join(input_folder, filename)
-        jpg_to_tiff_mask(jpg_path, output_folder)
+# 遍历 JSON 文件夹中的所有 JSON 文件
+for root, dirs, files in os.walk(json_folder):
+    for file in files:
+        if file.endswith('.json'):
+            json_file_path = os.path.join(root, file)
+            json_to_tiff_mask(json_file_path, output_folder)
